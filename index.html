@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style type="text/css">
+        html,
+        body {
+            margin: 0;
+            overflow: hidden;
+            height: 100%;
+            cursor: auto;
+        }
+
+        #myCanvas {
+            /* width: 100%;
+            height: 100%;
+            border: 1px dashed orangered;
+            margin-right: auto;
+            margin-left: auto;
+            display: block */
+
+            border: 1px dashed black;
+            padding: 0;
+            margin: auto;
+            display: block;
+            width: 800px;
+            height: 600px;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+
+        .bubble {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background-color: rgba(137, 138, 139, 0.671);
+            pointer-events: none;
+            /* Make sure the bubble doesn't interfere with other elements */
+            transform: translate(-50%, -50%);
+            /* Center the bubble at cursor position */
+            /* animation: bubble-animation 0.1s forwards; */
+            /* Animation */
+        }
+    </style>
+
+    <!-- From: http://paperjs.org/tutorials/getting-started/using-javascript-directly/ -->
+    <!-- Load the Paper.js library -->
+    <script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/paper.js/0.12.17/paper-full.min.js"></script>
+    <!-- Define inlined JavaScript -->
+    <script type="text/javascript">
+        // Only executed our code once the DOM is ready.
+
+        // TODO: Logic for missed click to redo clicks - done 
+        // TODO: Fix bubble removal on click 
+        // TODO: Fix full experiment completion.
+
+        window.onload = function () {
+
+            let cursorType = "bubble";
+
+            var cols = 4;
+            var rows = 5;
+            var circleRadius = 10;
+
+            var padding = 100;
+            var randomColoring = true;
+            var lastRedCircle = null;
+
+            let clickTimes = [];
+            let lastClickTime = null;
+            let targetCircle = null;
+
+            var selectedIndices = [];
+            var allSelected = false;
+            let eligibleCircles = [];
+            let experimentStarted = false;
+            let statisticsText;
+            let completionText;
+            let bubble;
+            var circles = [];
+
+            let lastX = 0;
+            let lastY = 0;
+            let timestamp = 0;
+
+            let trial = 0;
+            let missed = 0;
+            let cursorCircle;
+            let lastMissed = false;
+            const averageClickTime = 0;
+
+            let nearestItem = null;
+            let nearestDistance = Infinity;
+
+            let Radius;
+            
+            function resetExperiment() {
+                clickTimes = [];
+                lastClickTime = null;
+                targetCircle = null;
+                eligibleCircles = [];
+                experimentStarted = false;
+                trial = 0;
+                missed = 0;
+                // Remove existing objects
+                paper.project.activeLayer.removeChildren();
+                // Restart the experiment
+                cursorType = "normal";
+            }
+
+            function updateStatistics() {
+                const averageClickTime = clickTimes.length > 0 ? clickTimes.reduce((a, b) => a + b, 0) / clickTimes.length : 0;
+
+                // Remove old statistics text if exists
+                if (statisticsText) {
+                    statisticsText.remove();
+                }
+
+                // Display stats
+                statisticsText = new paper.PointText({
+                    point: [10, paper.view.bounds.height - 40],
+                    content: `Trial: ${trial}, Missed: ${missed}, Avg Time: ${averageClickTime.toFixed(2)} ms`,
+                    fillColor: 'black',
+                    fontFamily: 'Courier New',
+                    fontSize: 15
+                });
+                if (cursorType === "bubble") {
+                    new paper.PointText({
+                        point: [9, paper.view.bounds.height - 20],
+                        content: ` Bubble Cursor, Target size = 10.`,
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 15
+                    });
+
+                } else if (cursorType === "normal") {
+                    new paper.PointText({
+                        point: [9, paper.view.bounds.height - 20],
+                        content: ` Normal Cursor, Target size = 10.`,
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 15
+                    });
+
+                }
+
+
+
+            }
+
+            // Get a reference to the canvas object
+            const canvas = document.getElementById('myCanvas');
+
+            // Create an empty project and a view for the canvas
+            paper.setup(canvas);
+
+            // Function to create a row of n circles in the middle of the screen
+            function drawCircleRow(r, c) {
+                for (var i = 0; i < r; i++) {
+                    for (var j = 0; j < c; j++) {
+                        var x = padding + i * (circleRadius * 2 + padding);
+                        var y = padding + j * (circleRadius * 2 + padding);
+                        var circle = new paper.Path.Circle(new paper.Point(x, y), circleRadius);
+                        circle.fillColor = 'black';
+                        circles.push(circle);
+                    }
+                }
+
+                // Draw the view:
+                paper.view.draw();
+                return circles;
+            }
+
+            function pickRandomTarget() {
+                if (eligibleCircles.length === 0) {
+                    console.log("All circles selected!");
+                    paper.project.activeLayer.removeChildren()
+                    displayCompletionMessage();
+                    return;
+                }
+
+                if (lastMissed) {
+                    lastMissed = false;
+                    targetCircle.fillColor = 'black';
+                    eligibleCircles.push(targetCircle);
+                    pickRandomTarget();
+                    return;
+                } else {
+
+                    const index = Math.floor(Math.random() * eligibleCircles.length);
+                    targetCircle = eligibleCircles[index];
+                    targetCircle.fillColor = 'red';
+                    eligibleCircles.splice(index, 1);
+
+                }
+            }
+
+            function displayCompletionMessage() {
+
+                // Remove old completion text if exists
+                if (completionText) {
+                    completionText.remove();
+                }
+
+                if (cursorType === "bubble") {
+
+                    completionText = new paper.PointText({
+                        point: [10, paper.view.bounds.height / 2],
+                        content: "You have completed this stage of experiments",
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 12
+                    });
+                } else if (cursorType === "normal") {
+                    statisticsText = new paper.PointText({
+                        point: [10, paper.view.bounds.height / 2 - 15],
+                        content: `Trial: ${trial}, Avg Missed: ${missed / trial}, Avg Time: ${averageClickTime.toFixed(2)} ms`,
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 15
+                    });
+
+                    completionText = new paper.PointText({
+                        point: [10, paper.view.bounds.height / 2],
+                        content: "You have completed this stage of experiments. The next stage will start in a few seconds.",
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 15
+                    });
+
+                    // TODO: Start the next stage of the experiment
+
+                    setTimeout(() => {
+                        resetExperiment();
+                    }, 5000);
+
+                }
+            }
+
+
+            function onItemClicked(item) {
+
+                if (cursorType === "bubble") {
+                    const distance = targetCircle.position.getDistance(item.position) - 10 - Radius;
+                    if (distance <= 0) {
+                        trial++;
+                        targetCircle.fillColor = 'lightgrey';
+                        let currentTime = new Date().getTime();
+                        if (lastClickTime !== null) {
+                            clickTimes.push(currentTime - lastClickTime);
+                        }
+                        lastClickTime = currentTime;
+                    } else {
+                        lastMissed = true;
+                        missed++;
+                    }
+                } else {
+
+                    if (item === targetCircle) {
+                        trial++;
+                        targetCircle.fillColor = 'lightgrey';
+                        let currentTime = new Date().getTime();
+                        if (lastClickTime !== null) {
+                            clickTimes.push(currentTime - lastClickTime);
+                        }
+                        lastClickTime = currentTime;
+                    } else {
+                        lastMissed = true;
+                        missed++;
+
+                    }
+                }
+
+                updateStatistics();
+                pickRandomTarget();
+            }
+
+
+            function bubbleCursor(event) {
+
+                // Remove the old bubble if it exists.
+                if (bubble) {
+                    bubble.remove();
+                }
+
+                // let nearestItem = null;
+                // let nearestDistance = Infinity;
+
+                const sortedTargets = circles.map((target, index) => {
+                    // const dist = distance(cursor, target);
+                    const dist = event.point.getDistance(target.position);
+                    return { index, dist };
+                }).sort((a, b) => a.dist - b.dist);
+
+                // console.log(sortedTargets);
+
+                // Get the closest and second closest targets
+                const closest = sortedTargets[0];
+                const secondClosest = sortedTargets[1];
+
+                // Calculate ConDi for closest target
+                const ConDi = closest.dist + 10;
+                // Calculate IntDj for the second closest target
+                const IntDj = secondClosest.dist - 10;
+
+                // Set the bubble cursor radius
+                const bubbleCursorRadius = Math.min(ConDi, IntDj);
+                Radius = bubbleCursorRadius;
+                console.log(bubbleCursorRadius);
+
+
+                bubble = new paper.Path.Circle({
+                    center: event.point,
+                    radius: bubbleCursorRadius,  // Start with a small radius
+                    // strokeColor: 'blue'
+                });
+
+                // const hitOptions = {
+                //     fill: true,
+                //     tolerance: 10
+                // };
+
+                // const hitResult = paper.project.hitTest(event.point, hitOptions);
+                if (bubble) {
+                    onItemClicked(bubble);
+                }
+
+
+                // Iterate through all items to find the nearest one
+                // paper.project.activeLayer.children.forEach(item => {
+                //     // if (item === bubble) return;  // Skip the bubble itself
+
+                //     const distance = event.point.getDistance(item.position);
+
+                //     if (distance < nearestDistance) {
+                //         nearestDistance = distance;
+                //         nearestItem = item;
+                //     }
+                // });
+
+                // function circlesIntersectDistance(c1, r1, c2, r2) {
+                //     // const dx = c1.x - c2.x;
+                //     // const dy = c1.y - c2.y;
+                //     const distance = c1.getDistance(c2);
+                //     // Return the intersection distance, negative if no intersection
+                //     return distance - r1 - r2;
+                // }
+
+                // function closestIntersectingCircle(referenceCircle, r, circleArray) {
+                //     let minDistance = Infinity;
+                //     let closestCircle = null;
+
+                //     for (const circle of circleArray) {
+                //         const intersectDist = circlesIntersectDistance(referenceCircle, r, circle.center, circle.radius);
+
+                //         if (intersectDist < 0 && Math.abs(intersectDist) < minDistance) {
+                //             minDistance = Math.abs(intersectDist);
+                //             closestCircle = circle;
+                //         }
+                //     }
+                //     return closestCircle;
+                // }
+
+
+                // for (let i = 0; i < circles.length; i++) {
+                //     const target = circles[i];
+                //     // const intersectDist = circlesIntersectDistance(event.point, bubbleCursorRadius, target.position, target.radius);
+                //     // console.log(distance);
+
+                //     if (target && target.position) {
+                //         // const distance = event.point.getDistance(target.position) - bubbleCursorRadius - target.radius;
+                //         // console.log(distance);
+                //         // if (distance < 0 && Math.abs(distance) < nearestDistance) {
+                //         //     nearestDistance = Math.abs(distance);
+                //         //     nearestItem = target;
+                //         // }
+                //         const distance = event.point.getDistance(target.position);
+                //         // const point = cursorCircle.center;
+                //         // const dist = point.getDistance(target.position);  // Assuming target.position is well-defined.
+                //         // sortedTargets.push({ index: i, dist: dist });
+                //         if (distance < nearestDistance) {
+                //             nearestDistance = distance;
+                //             nearestItem = target;
+                //         }
+                //         // console.log(distance);
+
+                //     }
+                // }
+
+                // if (nearestItem) {
+                //     onItemClicked(nearestItem);
+                // }
+
+
+
+
+
+
+                // If there's a nearest item, adjust the bubble radius and fill color
+                // if (nearestItem) {
+                //     bubble.radius = bubbleCursorRadius;
+                //     nearestItem.fillColor = 'lightgrey';
+
+                //     trial++;
+                //     let currentTime = new Date().getTime();
+                //     if (lastClickTime !== null) {
+                //         clickTimes.push(currentTime - lastClickTime);
+                //     }
+                //     lastClickTime = currentTime;
+                // } else {
+
+                //     lastMissed = true;
+                //     missed++;
+                // }
+                // updateStatistics();
+                // pickRandomTarget();
+
+                // Update the view
+                paper.view.update();
+
+            };
+
+
+            function normalCursor(event) {
+                const hitOptions = {
+                    fill: true,
+                    tolerance: 10
+                };
+                const hitResult = paper.project.hitTest(event.point, hitOptions);
+                if (hitResult) {
+                    onItemClicked(hitResult.item);
+                }
+            };
+
+
+
+            function startExperiment() {
+                experimentStarted = true;
+                let gridCircles = drawCircleRow(5, 4);
+                eligibleCircles = [...gridCircles];
+                // pickRandomTarget(gridCircles);
+                pickRandomTarget();
+                updateStatistics();
+            }
+
+            function displayInstructions() {
+                const instructions = [
+                    "In this experiment, find the target highlighted in red.",
+                    "Click on the target.",
+                    "A new target will be highlighted. Repeat until you have clicked all targets.",
+                    "Try to be fast and accurate.",
+                    "Press the space bar to start the experiment."
+                ];
+
+                instructions.forEach((line, index) => {
+                    new paper.PointText({
+                        point: [10, 30 + index * 20],
+                        content: line,
+                        fillColor: 'black',
+                        fontFamily: 'Courier New',
+                        fontSize: 15
+                    });
+                });
+            }
+            // Display instructions initially.
+            displayInstructions();
+
+
+
+
+            paper.view.onMouseDown = function onMouseDown(event) {
+                if (!experimentStarted) {
+                    paper.project.activeLayer.removeChildren();  // Clear the canvas
+                    startExperiment();
+                } else if (cursorType === "normal") {
+                    normalCursor(event);
+                } else if (cursorType === "bubble") {
+                    // startExperiment();
+                    bubbleCursor(event);
+                }
+            };
+
+            function distance(a, b) {
+                return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+            }
+
+
+            paper.view.onMouseMove = function onMouseMove(event) {
+                if (cursorType === "bubble") {
+
+                    // Remove old cursor circle if exists
+                    if (cursorCircle) {
+                        cursorCircle.remove();
+                    }
+                    // Draw new cursor circle at mouse position
+                    const sortedTargets = circles.map((target, index) => {
+                        const dist = event.point.getDistance(target.position);
+                        return { index, dist };
+                    }).sort((a, b) => a.dist - b.dist);
+
+
+                    // Get the closest and second closest targets
+                    const closest = sortedTargets[0];
+                    const secondClosest = sortedTargets[1];
+
+                    if (closest && secondClosest) {
+                        const ConDi = closest.dist + 10; // Replace 10 with the actual radius
+                        const IntDj = secondClosest.dist - 10; // Replace 10 with the actual radius
+                        const bubbleCursorRadius = Math.min(ConDi, IntDj);
+                        // console.log(bubbleCursorRadius);
+
+                        cursorCircle = new paper.Path.Circle({
+                            center: event.point,
+                            radius: bubbleCursorRadius,
+                            fillColor: 'rgba(137, 138, 139, 0.5)'
+                        });
+                    }
+                    // Update the view
+                    paper.view.update();
+                }
+            };
+        }
+
+
+
+    </script>
+</head>
+
+<body>
+    <canvas id="myCanvas">
+    </canvas>
+</body>
+
+</html>
